@@ -57,6 +57,7 @@ class Timer {
       std::cout << "partition_runtime : " << partition_runtime << "\n";
       std::cout << "process_cluster_runtime : " << process_cluster_runtime << "\n";
       std::cout << "partitioned_execution_runtime : " << execution_runtime << "\n";
+      std::cout << "initialization time : " << initialization_time << "\n";
       std::cout << "--------------------------------\n\n";
     
 //      std::cerr << "check ready vectors: \n";
@@ -400,6 +401,9 @@ class Timer {
    
     // partitioned _taskflow execution time
     size_t execution_runtime = 0;
+
+    // partition _tasflow initialization time
+    size_t initialization_time = 0;
 
     // pins of sink tasks in btask and ftask _taskflow
     std::vector<Pin*> _bsink_pins;

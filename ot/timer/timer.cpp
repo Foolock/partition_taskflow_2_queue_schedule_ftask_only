@@ -1056,10 +1056,10 @@ void Timer::_update_timing() {
   // get partitions 
   start = std::chrono::steady_clock::now(); 
   std::cout.setstate(std::ios_base::failbit);
-//  _get_fpartitions();
-  _get_bpartitions();
-//  _assign_fpartitions();
-  _assign_bpartitions();
+  _get_fpartitions();
+//  _get_bpartitions();
+  _assign_fpartitions();
+//  _assign_bpartitions();
   std::cout.clear();
   end = std::chrono::steady_clock::now();
   partition_runtime += std::chrono::duration_cast<std::chrono::microseconds>(end-start).count();
@@ -1073,22 +1073,22 @@ void Timer::_update_timing() {
   // get topological order
   _get_topo_order();
 
-  // get number of pins per level per partition
-  _get_num_pin_perlevel_perpartition();
-
-  // build partitioned taskflow
+  // build partitioned btask only taskflow
   _taskflow.clear();
   _build_partitioned_taskflow();
 
   // get overlap profile
   _get_overlap_profile();
 
-  // Execute the task
+  // Execute the ftask
   start = std::chrono::steady_clock::now();
   _executor.run(_taskflow).wait();
   end = std::chrono::steady_clock::now();
   execution_runtime += std::chrono::duration_cast<std::chrono::microseconds>(end-start).count();
   _taskflow.clear();
+
+  // Execute the btask
+  _execute_task_manually();
 
   // clear repcut used varibles
   _reset_repcut();
@@ -2731,11 +2731,11 @@ void Timer::_assign_rep() {
       pin->_isbRep = true;
     }
   }
-//  for(auto pin : _fprop_cands) {
-//    if(_popcount(pin->_fpartition_id) > 1) {
-//      pin->_isfRep = true;
-//    }
-//  }
+  for(auto pin : _fprop_cands) {
+    if(_popcount(pin->_fpartition_id) > 1) {
+      pin->_isfRep = true;
+    }
+  }
 
 }
 
@@ -2774,103 +2774,54 @@ void Timer::_get_topo_order() {
   */
 
   mt_kahypar_partition_id_t num_partition = _set_num_partition;
-//  if(num_partition > _fsink_pins.size()) {
-//    num_partition = _fsink_pins.size();
-//  }
-//  for(int i=0; i<num_partition; i++) {
-//    std::vector<Pin*> one_partition_pins;
-//    uint32_t scan = 1 << i;
-//    for(auto pin : _fprop_cands) {
-//      if((pin->_fpartition_id & scan) == scan) {
-//        one_partition_pins.push_back(pin);
-//      }
-//    }
-//    _ftopo_partitioned_pins.push_back(one_partition_pins);
-//  }
-//
   num_partition = _set_num_partition;
-  if(num_partition > _bsink_pins.size()) {
-    num_partition = _bsink_pins.size();
+  if(num_partition > _fsink_pins.size()) {
+    num_partition = _fsink_pins.size();
   }
-  std::set<int> _bpartition_refined(_bpartition.begin(), _bpartition.end()); // _bpartition results looks weird?? need to be refined
+  std::set<int> _fpartition_refined(_fpartition.begin(), _fpartition.end()); // _fpartition results looks weird?? need to be refined
                                                                              // it turns out that partition sometimes won't give you set_num_partitions of partitions
-//  std::cerr << "num_partition = " << num_partition << "\n";
-//  std::cerr << "_bsink_pins.size() = " << _bsink_pins.size() << "\n";
-//  std::cerr << "check _bpartition_refined\n";
-//  for(auto num : _bpartition_refined) {
-//    std::cerr << num << " ";
-//  }
-//  std::cerr << "\n";
-  for(auto it = _bpartition_refined.begin(); it != _bpartition_refined.end(); it++) {
+  for(auto it = _fpartition_refined.begin(); it != _fpartition_refined.end(); it++) {
     std::vector<Pin*> one_partition_pins;
     uint32_t scan = 1 << *it;
-    for(auto pin : _bprop_cands_sorted) {
-      if((pin->_bpartition_id & scan) == scan) {
+    for(auto pin : _fprop_cands) {
+      if((pin->_fpartition_id & scan) == scan) {
         one_partition_pins.push_back(pin);
       }
     }
-    _btopo_partitioned_pins.push_back(one_partition_pins); 
-//    if(one_partition_pins.size() == 0) {
-//      std::cerr << "error: one_partition_pins.size() == 0\n";
-//      std::exit(EXIT_FAILURE);
-//    }
+    _ftopo_partitioned_pins.push_back(one_partition_pins); 
   }
+ 
+//  num_partition = _set_num_partition;
+//  if(num_partition > _bsink_pins.size()) {
+//    num_partition = _bsink_pins.size();
+//  }
+//  std::set<int> _bpartition_refined(_bpartition.begin(), _bpartition.end()); // _bpartition results looks weird?? need to be refined
+//                                                                             // it turns out that partition sometimes won't give you set_num_partitions of partitions
+//  for(auto it = _bpartition_refined.begin(); it != _bpartition_refined.end(); it++) {
+//    std::vector<Pin*> one_partition_pins;
+//    uint32_t scan = 1 << *it;
+//    for(auto pin : _bprop_cands_sorted) {
+//      if((pin->_bpartition_id & scan) == scan) {
+//        one_partition_pins.push_back(pin);
+//      }
+//    }
+//    _btopo_partitioned_pins.push_back(one_partition_pins); 
+//  }
 }
 
 void Timer::_get_num_pin_perlevel_perpartition() {
 
-  for(const auto& partition : _btopo_partitioned_pins) {
-    std::vector<int> num_pins_perlevel(1,0); // give it an initial value as 0 
-    if(partition.size() == 0) {
-      std::cerr << "found one \n";
-    }
-    int cur_blevel = partition[0]->_blevel;
-    int count = 1;
-    for(size_t i=1; i<partition.size(); i++) {
-      if(partition[i]->_blevel != cur_blevel) {
-        num_pins_perlevel.push_back(count);
-//        count = 1;
-        cur_blevel = partition[i]->_blevel;
-      } 
-      count ++;
-    }
-    num_pins_perlevel.push_back(count); // edge case
-    _btopo_partitioned_num_pins_level.push_back(num_pins_perlevel);
-  }
-
-//  std::cerr << "check _btopo_partitioned_pins: \n";
-//  for(const auto& partition : _btopo_partitioned_pins) {
-//    for(auto pin : partition) {
-//      std::string s;
-//      if(pin->_isbRep) {
-//        s = "true";
-//      }
-//      else {
-//        s = "false";
-//      }
-//      std::cerr << pin->_name << "(" << pin->_blevel << ", " << s << ") ";
-//    }
-//    std::cerr << "\n";
-//  }
-//
-//  std::cerr << "check _btopo_partitioned_num_pins_level: \n";
-//  for(const auto& partition : _btopo_partitioned_num_pins_level) {
-//    for(auto num : partition) {
-//      std::cerr << num << " ";
-//    }
-//    std::cerr << "\n";
-//  }
 }
 
 void Timer::_execute_task_manually() {
 
-  for(auto pin : _fprop_cands) {
-    _fprop_rc_timing(*pin); // 5 typical tasks for a p to update timing in forward propagation // most time consuming if p has net
-    _fprop_slew(*pin);
-    _fprop_delay(*pin);
-    _fprop_at(*pin);
-    _fprop_test(*pin);
-  }
+//  for(auto pin : _fprop_cands) {
+//    _fprop_rc_timing(*pin); // 5 typical tasks for a p to update timing in forward propagation // most time consuming if p has net
+//    _fprop_slew(*pin);
+//    _fprop_delay(*pin);
+//    _fprop_at(*pin);
+//    _fprop_test(*pin);
+//  }
   for(auto pin : _bprop_cands_sorted) {
     _bprop_rat(*pin); // 1 typical task for a p to update timing in backward progragation
   }
@@ -2878,74 +2829,36 @@ void Timer::_execute_task_manually() {
 
 void Timer::_build_partitioned_taskflow() {
 
-  for(auto pin : _fprop_cands) { // std::deque<Pin*> _fprop_cands;
-    assert(!pin->_ftask);
-    pin->_ftask = _taskflow.emplace([this, pin] () { // std::optional<tf::Task> _ftask; // std::optional 不用担心额外的动态内存分配 c++17
-      _fprop_rc_timing(*pin); // 5 typical tasks for a pin to update timing in forward propagation // most time consuming if pin has net
-      _fprop_slew(*pin);
-      _fprop_delay(*pin);
-      _fprop_at(*pin);
-      _fprop_test(*pin);
-    }).name(pin->_name);
-  }
 
-  // Build the dependency, this is the forward part of the dependency graph
-  for(auto to : _fprop_cands) {
-    for(auto arc : to->_fanin) { // std::list<RctEdge*> _fanin;
-      if(arc->_has_state(Arc::LOOP_BREAKER)) {
-        continue;
-      }
-      if(auto& from = arc->_from; from._has_state(Pin::FPROP_CAND)) {
-        from._ftask->precede(to->_ftask.value());
-      }
-    }
+  // initialize current num of dependents for pins in _fprop_cands
+  for(auto pin : _fprop_cands) {
+    pin->_fcur_num_dependents = pin->_fanin.size();
   }
-
-  // initialize current num of dependents for pins in _bprop_cands
-  for(auto pin : _bprop_cands) {
-    pin->_bcur_num_dependents = pin->_fanout.size();
-  }
-  for(auto pin : _fsink_pins) { // not sure if it is necessary?
-    pin->_bcur_num_dependents = 0;
-  }
-
   
-  std::vector<tf::Task> btask(_btopo_partitioned_pins.size());
+  std::vector<tf::Task> ftask(_ftopo_partitioned_pins.size());
   int index = 0;
-  std::set<int> _bpartition_refined(_bpartition.begin(), _bpartition.end());
-  auto it = _bpartition_refined.begin();
+  std::set<int> _fpartition_refined(_fpartition.begin(), _fpartition.end());
+  auto it = _fpartition_refined.begin();
   
-  // initialize _inbRqueue for each pin in source pins of partitions
-  for(auto& pin_vec : _btopo_partitioned_pins) {
+  for(auto& pin_vec : _ftopo_partitioned_pins) {
     uint32_t scan = 1 << *it;
-    for(auto pin : pin_vec) {
-      if(pin->_fanout.size() == 0) {
-        pin->_inbRqueue = pin->_inbRqueue | scan;
+    std::queue<Pin*> ready_queue;
+    std::queue<Pin*> pending_queue;
+    std::vector<bool> visited(pin_vec.size(), false);
+    std::unordered_map<Pin*, int> pin_vec_map;
+    for(size_t i=0; i<pin_vec.size(); i++) {
+      pin_vec_map[pin_vec[i]] = i;
+    }
+    for(auto pin : pin_vec) { // push all source pins of btask into ready queue
+      if(pin->_fanin.size() == 0) {
+        ready_queue.push(pin);
+        visited[pin_vec_map[pin]] = true;
       }
     }
-    index ++;
-    it ++;
-  }
-  index = 0;
-  it = _bpartition_refined.begin();
-  for(auto& pin_vec : _btopo_partitioned_pins) {
-    uint32_t scan = 1 << *it;
-    btask[index] = _taskflow.emplace([this, pin_vec, scan, index] () mutable{
+    ftask[index] = _taskflow.emplace([this, pin_vec, scan, index, ready_queue, pending_queue, visited, pin_vec_map] () mutable{
      
 //      std::cerr << "\n----------------------executing partition = " << index << "----------------------\n";
-      std::queue<Pin*> ready_queue;
-      std::queue<Pin*> pending_queue;
-      std::vector<bool> visited(pin_vec.size(), false);
-      std::unordered_map<Pin*, int> pin_vec_map;
-      for(size_t i=0; i<pin_vec.size(); i++) {
-        pin_vec_map[pin_vec[i]] = i;
-      }
-      for(auto pin : pin_vec) { // push all source pins of btask into ready queue
-        if(pin->_fanout.size() == 0) {
-          ready_queue.push(pin);
-          visited[pin_vec_map[pin]] = true;
-        }
-      }
+      
       while(!(ready_queue.empty() && pending_queue.empty())) {
         while(!ready_queue.empty()) {
        
@@ -2954,32 +2867,36 @@ void Timer::_build_partitioned_taskflow() {
 //          std::cerr << "pop from ready_queue: " << p->_name << " with work status: " << p->_btask_status << "\n";
 
           int cur_task_status = 0;
-          if(p->_btask_status.compare_exchange_strong(cur_task_status, 1)) {
-            _bprop_rat(*p);
-            for(auto arc : p->_fanin) {
-              Pin* from = &(arc->_from);
-              if(from->_has_state(Pin::BPROP_CAND)) {
-                if(from->_bcur_num_dependents.fetch_sub(1) == 1) { // push all successors with no dependents after sub into ready queue
-                  if((from->_bpartition_id & scan) == scan && !visited[pin_vec_map[from]]) {  
-//                    std::cerr << "push from status 1: " << from->_name << "\n";
-                    ready_queue.push(from);
-                    visited[pin_vec_map[from]] = true;
+          if(p->_ftask_status.compare_exchange_strong(cur_task_status, 1)) {
+            _fprop_rc_timing(*p); // 5 typical tasks for a p to update timing in forward propagation // most time consuming if p has net
+            _fprop_slew(*p);
+            _fprop_delay(*p);
+            _fprop_at(*p);
+            _fprop_test(*p);
+            for(auto arc : p->_fanout) {
+              Pin* to = &(arc->_to);
+              if(to->_has_state(Pin::FPROP_CAND)) {
+                if(to->_fcur_num_dependents.fetch_sub(1) == 1) { // push all successors with no dependents after sub into ready queue
+                  if((to->_fpartition_id & scan) == scan && !visited[pin_vec_map[to]]) {  
+//                    std::cerr << "push to status 1: " << to->_name << "\n";
+                    ready_queue.push(to);
+                    visited[pin_vec_map[to]] = true;
                   }
                 }
               }
             }
-            p->_btask_status.store(2);
+            p->_ftask_status.store(2);
           }
           else if(cur_task_status == 2) { // when popped pin status = 2, it means other partitions has done this
                                                   // no need to sub its successors' dependents
-            for(auto arc : p->_fanin) {
-              Pin* from = &(arc->_from);
-              if(from->_has_state(Pin::BPROP_CAND)) {
-                if(from->_bcur_num_dependents.load() == 0) { // push all successors with no dependents after sub into ready queue
-                  if((from->_bpartition_id & scan) == scan && !visited[pin_vec_map[from]]) {
-//                    std::cerr << "push from status 2: " << from->_name << "\n";
-                    ready_queue.push(from);
-                    visited[pin_vec_map[from]] = true;
+            for(auto arc : p->_fanout) {
+              Pin* to = &(arc->_to);
+              if(to->_has_state(Pin::FPROP_CAND)) {
+                if(to->_fcur_num_dependents.load() == 0) { // push all successors with no dependents after sub into ready queue
+                  if((to->_fpartition_id & scan) == scan && !visited[pin_vec_map[to]]) {
+//                    std::cerr << "push to status 2: " << to->_name << "\n";
+                    ready_queue.push(to);
+                    visited[pin_vec_map[to]] = true;
                   }
                 }
               }
@@ -2993,15 +2910,15 @@ void Timer::_build_partitioned_taskflow() {
         while(!pending_queue.empty()) {
           Pin* p = pending_queue.front();
           pending_queue.pop();
-          if(p->_btask_status.load() == 2) {
-            for(auto arc : p->_fanin) {
-              Pin* from = &(arc->_from);
-              if(from->_has_state(Pin::BPROP_CAND)) {
-                if(from->_bcur_num_dependents.load() == 0) {
-                  if((from->_bpartition_id & scan) == scan && !visited[pin_vec_map[from]]) {
-//                    std::cerr << "push from pending: " << from->_name << "\n";
-                    ready_queue.push(from);
-                    visited[pin_vec_map[from]] = true;
+          if(p->_ftask_status.load() == 2) {
+            for(auto arc : p->_fanout) {
+              Pin* to = &(arc->_to);
+              if(to->_has_state(Pin::FPROP_CAND)) {
+                if(to->_fcur_num_dependents.load() == 0) {
+                  if((to->_fpartition_id & scan) == scan && !visited[pin_vec_map[to]]) {
+//                    std::cerr << "push to pending: " << to->_name << "\n";
+                    ready_queue.push(to);
+                    visited[pin_vec_map[to]] = true;
                   }
                 }
               }
@@ -3020,21 +2937,6 @@ void Timer::_build_partitioned_taskflow() {
     index++;
     it++;
   }
-  /*
-   * traverse _btopo_partitioned_pins, for each partition in _btopo_partitioned_pins
-   * traverse each partition, if pin->_fanout.size() = 0
-   * then this pin belongs to _fsink_pins. So we need to make sure this pin->_ftask is done before
-   * this partition happen, this means
-   * pin->_ftask->precede(btask[i]);
-   */
-  for(size_t i=0; i<_btopo_partitioned_pins.size(); i++) {
-    for(size_t j=0; j<_btopo_partitioned_pins[i].size(); j++) {
-      if(_btopo_partitioned_pins[i][j]->_fanout.size() == 0) {
-        _btopo_partitioned_pins[i][j]->_ftask->precede(btask[i]);
-      }
-    }
-  } 
-
 }
 
 void Timer::_reset_repcut() {
